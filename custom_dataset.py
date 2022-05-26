@@ -5,6 +5,11 @@ from torch.utils.data import Dataset
 from sklearn import preprocessing
 import torch.nn.functional as F
 
+label_list = ["apple_pie", "baby_back_ribs", "baklava", "beef_carpaccio", "beef_tartare",
+            "beet_salad", "beignets", "bibimbap", "bread_pudding", "breakfast_burrito",
+            "bruschetta", "caesar_salad", "cannoli", "caprese_salad", "carrot_cake",
+            "ceviche", "cheese_plate"]
+
 
 class CustomDataset(Dataset):
     def __init__(self, image_path: str, text_path: str, transform):
@@ -15,8 +20,12 @@ class CustomDataset(Dataset):
         targets = []
         image_paths = []
         for dirpath, dirnames, filenames in os.walk(image_path):
+            # since I don't want to delete image 
+            label = dirpath.split("/")[-1]
+            if label not in label_list:
+                continue
             image_names.extend(filenames)
-            targets.extend([dirpath.split("/")[-1]] * len(filenames))
+            targets.extend([label] * len(filenames))
             image_paths.extend([dirpath] * len(filenames))
 
         self.transform = transform

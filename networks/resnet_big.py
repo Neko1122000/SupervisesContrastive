@@ -223,7 +223,8 @@ class SupCEResNet(nn.Module):
         super(SupCEResNet, self).__init__()
         model_fun, dim_in = model_dict[name]
         self.encoder = model_fun()
-        self.fc = nn.Linear(dim_in, num_classes)
+        text_dim = 384 # state of sentence bert model
+        self.fc = nn.Linear(dim_in+text_dim, num_classes)
 
     def forward(self, x):
         return self.fc(self.encoder(x))
@@ -234,7 +235,8 @@ class LinearClassifier(nn.Module):
     def __init__(self, name='resnet50', num_classes=10):
         super(LinearClassifier, self).__init__()
         _, feat_dim = model_dict[name]
-        self.fc = nn.Linear(feat_dim, num_classes)
+        text_dim = 384 # state of sentence bert model
+        self.fc = nn.Linear(feat_dim+text_dim, num_classes)
 
     def forward(self, features):
         return self.fc(features)

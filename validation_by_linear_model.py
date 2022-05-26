@@ -59,6 +59,7 @@ def parse_option():
                         help='using cosine annealing')
     parser.add_argument('--warm', action='store_true',
                         help='warm-up for large batch training')
+    parser.add_argument('--size', type=int, default=64, help='parameter for RandomResizedCrop')
 
     parser.add_argument('--ckpt', type=str, default='',
                         help='path to pre-trained model')
@@ -68,7 +69,7 @@ def parse_option():
     # set the path according to the environment
     opt.data_folder = './data/food_dataset/'
     if opt.ckpt == '':
-        opt.ckpt = '/home/vvn/phuongdm/final_project/model/SupConst/save/SupCon/path_models/SupCon_path_resnet34_lr_0.5_decay_0.0001_bsz_256_temp_0.1_trial_0/last.pth'
+        opt.ckpt = '/home/vvn/phuongdm/final_project/model/SupConst/save/SupCon/path_models/SupCon_path_resnet34_lr_0.5_decay_0.0001_bsz_32_temp_0.1_trial_0/last.pth'
 
     iterations = opt.lr_decay_epochs.split(',')
     opt.lr_decay_epochs = list([])
@@ -258,6 +259,7 @@ def set_loader(opt):
     ])
 
     val_transform = transforms.Compose([
+        transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.ToTensor(),
         normalize,
     ])
@@ -267,6 +269,7 @@ def set_loader(opt):
         texts_data = opt.data_folder+"texts/train_titles.csv"
         train_dataset = CustomDataset(image_folder, texts_data, transform=train_transform)
 
+        # TODO: need to clean test image folder since its contain not train label
         image_folder = opt.data_folder+"images/test"
         texts_data = opt.data_folder+"texts/test_titles.csv"
         val_dataset = CustomDataset(image_folder, texts_data, transform=val_transform)
@@ -278,8 +281,8 @@ def set_loader(opt):
         train_dataset, batch_size=opt.batch_size, shuffle=(train_sampler is None),
         num_workers=opt.num_workers, pin_memory=True, sampler=train_sampler)
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=256, shuffle=False,
-        num_workers=4, pin_memory=True)
+        val_dataset, batch_size=opt.batch_size, shuffle=False,
+        num_workers=opt.num_workers, pin_memory=True)
 
     return train_loader, val_loader
 
