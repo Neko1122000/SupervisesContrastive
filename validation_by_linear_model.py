@@ -16,6 +16,9 @@ from networks.resnet_big import SupConResNet, LinearClassifier
 
 from custom_dataset import CustomDataset
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
+
 try:
     import apex
     from apex import amp, optimizers
@@ -44,7 +47,7 @@ def parse_option():
                         help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.2,
                         help='decay rate for learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0,
+    parser.add_argument('--weight_decay', type=float, default=0.0001,
                         help='weight decay')
     parser.add_argument('--momentum', type=float, default=0.9,
                         help='momentum')
@@ -64,6 +67,13 @@ def parse_option():
     parser.add_argument('--ckpt', type=str, default='',
                         help='path to pre-trained model')
 
+    parser.add_argument('--method', type=str, default='SupCon',
+                        choices=['SupCon', 'SimCLR'], help='choose method')
+    parser.add_argument('--temp', type=float, default=0.07,
+                        help='temperature for loss function')
+    parser.add_argument('--trial', type=str, default='0',
+                        help='id for recording multiple runs')
+
     opt = parser.parse_args()
 
     opt.model_name = '{}_{}_{}_lr_{}_decay_{}_size_{}_temp_{}_trial_{}'.\
@@ -73,7 +83,7 @@ def parse_option():
     # set the path according to the environment
     opt.data_folder = './data/food_dataset/'
     if opt.ckpt == '':
-        opt.ckpt = f'/home/vvn/phuongdm/final_project/model/SupConst/save/SupCon/path_models/{opt.model_name}/last.pth'
+        opt.ckpt = f'./model/SupConst/save/SupCon/path_models/{opt.model_name}/last.pth'
 
     iterations = opt.lr_decay_epochs.split(',')
     opt.lr_decay_epochs = list([])
@@ -143,11 +153,10 @@ def train(train_loader, model, classifier, criterion, optimizer, epoch, opt):
     top1 = AverageMeter()
 
     end = time.time()
-    for idx, (images, descriptions, labels) in enumerate(train_loader):
+    for idx, (descriptions, images, labels) in enumerate(train_loader):
         data_time.update(time.time() - end)
 
         images = images.cuda(non_blocking=True)
-        labels = labels.type(torch.LongTensor)
         labels = labels.cuda(non_blocking=True)
         bsz = labels.shape[0]
 
@@ -204,7 +213,7 @@ def validate(val_loader, model, classifier, criterion, opt):
 
     with torch.no_grad():
         end = time.time()
-        for idx, (images, descriptions, labels) in enumerate(val_loader):
+        for idx, (descriptions, images, labels) in enumerate(val_loader):
             images = images.float().cuda()
             labels = labels.type(torch.LongTensor)
             labels = labels.cuda()

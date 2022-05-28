@@ -1,6 +1,7 @@
 torchvision 
 torchaudio 
-cudatoolkit==11.3
 tensorboard_logger
 pandas
 transformers
+sentence-transformers
+tensorflow

@@ -40,7 +40,7 @@ class CustomDataset(Dataset):
         self.label_encoder = preprocessing.LabelEncoder()
         self.label_encoder.fit(label_list)
         self.info["label"] = self.label_encoder.transform(targets)
-        self.info["label"] = self.info["label"].astype('int32')
+        self.info["description"] = self.info["description"].astype('str')
 
         # self.info["label"] = self.info["label"].apply(lambda x: label_dict[x])
         # print(self.info.label.unique())
@@ -58,7 +58,7 @@ class CustomDataset(Dataset):
             img = self.transform(img)
             
         # print(target.unique())
-        return img, self.info.iloc[index, 0], target
+        return self.info.iloc[index, 0], img, target
 
     def __len__(self):
         return self.info.shape[0]

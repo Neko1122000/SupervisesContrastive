@@ -188,7 +188,7 @@ class SupConResNet(nn.Module):
         self.text_len = text_len
         self.text_dim = 384 # state of sentence bert model
         # self.description_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased", output_hidden_states = True)
-        self.description_tokenizer = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+        self.description_tokenizer = SentenceTransformer('paraphrase-MiniLM-L6-v2', device="cuda")
         self.text_head = nn.Sequential(
                             nn.Linear(self.text_dim, self.text_dim),
                             nn.ReLU(inplace=True),

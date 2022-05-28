@@ -18,6 +18,8 @@ from util import adjust_learning_rate, warmup_learning_rate
 from util import set_optimizer, save_model
 from networks.resnet_big import SupConResNet
 from losses import SupConLoss
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
 
 from custom_dataset import CustomDataset
 
@@ -188,7 +190,7 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
     losses = AverageMeter()
 
     end = time.time()
-    for idx, (images, descriptions, labels) in enumerate(train_loader):
+    for idx, (descriptions, images, labels) in enumerate(train_loader):
         data_time.update(time.time() - end)
 
         images = torch.cat([images[0], images[1]], dim=0)
