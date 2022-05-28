@@ -94,9 +94,9 @@ def parse_option():
     for it in iterations:
         opt.lr_decay_epochs.append(int(it))
 
-    opt.model_name = '{}_{}_{}_lr_{}_decay_{}_bsz_{}_temp_{}_trial_{}'.\
+    opt.model_name = '{}_{}_{}_lr_{}_decay_{}_size_{}_temp_{}_trial_{}'.\
         format(opt.method, opt.dataset, opt.model, opt.learning_rate,
-               opt.weight_decay, opt.batch_size, opt.temp, opt.trial)
+               opt.weight_decay, opt.size, opt.temp, opt.trial)
 
     if opt.cosine:
         opt.model_name = '{}_cosine'.format(opt.model_name)
@@ -196,6 +196,7 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
             images = images.cuda(non_blocking=True)
 
             # labels = F.one_hot(labels)
+            labels = torch.as_tensor(labels)
             labels = labels.cuda(non_blocking=True)
 
         bsz = labels.shape[0]

@@ -66,19 +66,20 @@ def parse_option():
 
     opt = parser.parse_args()
 
+    opt.model_name = '{}_{}_{}_lr_{}_decay_{}_size_{}_temp_{}_trial_{}'.\
+        format(opt.method, opt.dataset, opt.model, opt.learning_rate,
+               opt.weight_decay, opt.size, opt.temp, opt.trial)
+
     # set the path according to the environment
     opt.data_folder = './data/food_dataset/'
     if opt.ckpt == '':
-        opt.ckpt = '/home/vvn/phuongdm/final_project/model/SupConst/save/SupCon/path_models/SupCon_path_resnet34_lr_0.5_decay_0.0001_bsz_32_temp_0.1_trial_0/last.pth'
+        opt.ckpt = f'/home/vvn/phuongdm/final_project/model/SupConst/save/SupCon/path_models/{opt.model_name}/last.pth'
 
     iterations = opt.lr_decay_epochs.split(',')
     opt.lr_decay_epochs = list([])
     for it in iterations:
         opt.lr_decay_epochs.append(int(it))
 
-    opt.model_name = '{}_{}_lr_{}_decay_{}_bsz_{}'.\
-        format(opt.dataset, opt.model, opt.learning_rate, opt.weight_decay,
-               opt.batch_size)
 
     if opt.cosine:
         opt.model_name = '{}_cosine'.format(opt.model_name)
@@ -146,6 +147,7 @@ def train(train_loader, model, classifier, criterion, optimizer, epoch, opt):
         data_time.update(time.time() - end)
 
         images = images.cuda(non_blocking=True)
+        labels = labels.type(torch.LongTensor)
         labels = labels.cuda(non_blocking=True)
         bsz = labels.shape[0]
 
@@ -204,6 +206,7 @@ def validate(val_loader, model, classifier, criterion, opt):
         end = time.time()
         for idx, (images, descriptions, labels) in enumerate(val_loader):
             images = images.float().cuda()
+            labels = labels.type(torch.LongTensor)
             labels = labels.cuda()
             bsz = labels.shape[0]
 
