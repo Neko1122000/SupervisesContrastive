@@ -40,7 +40,7 @@ def parse_option():
     # optimization
     parser.add_argument('--learning_rate', type=float, default=0.2,
                         help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='350,400,450',
+    parser.add_argument('--lr_decay_epochs', type=str, default='5,10,15,20',
                         help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1,
                         help='decay rate for learning rate')
@@ -51,8 +51,9 @@ def parse_option():
 
     # model dataset
     parser.add_argument('--model', type=str, default='resnet50')
-    parser.add_argument('--dataset', type=str, default='cifar10',
-                        choices=['cifar10', 'cifar100'], help='dataset')
+    parser.add_argument('--dataset', type=str, default='path',
+                        choices=['cifar10', 'cifar100', 'path'], help='dataset')
+    parser.add_argument('--data_folder', type=str, default=None, help='path to custom dataset')
 
     # other setting
     parser.add_argument('--cosine', action='store_true',
@@ -67,7 +68,8 @@ def parse_option():
     opt = parser.parse_args()
 
     # set the path according to the environment
-    opt.data_folder = './datasets/food_dataset/images/'
+    if opt.data_folder is None:
+        opt.data_folder = './data/food_dataset/'
     opt.model_path = './save/SupCon/{}_models'.format(opt.dataset)
     opt.tb_path = './save/SupCon/{}_tensorboard'.format(opt.dataset)
 
@@ -109,6 +111,8 @@ def parse_option():
         opt.n_cls = 10
     elif opt.dataset == 'cifar100':
         opt.n_cls = 100
+    elif opt.dataset == 'path':
+        opt.n_cls = 11
     else:
         raise ValueError('dataset not supported: {}'.format(opt.dataset))
 
@@ -157,8 +161,9 @@ def set_loader(opt):
                                         train=False,
                                         transform=val_transform)
     elif opt.dataset == 'path':
-        train_dataset = datasets.ImageFolder(root=opt.data+"train", transforms=train_transform)
-        val_dataset = datasets.ImageFolder(root=opt.data+"test", transforms=train_transform)
+        image_folder = opt.data_folder+"images/train"
+        texts_data = opt.data_folder+"texts/train_titles.csv"
+        train_dataset = CustomDataset(image_folder, texts_data, transform=TwoCropTransform(train_transform))
     else:
         raise ValueError(opt.dataset)
 
@@ -167,8 +172,8 @@ def set_loader(opt):
         train_dataset, batch_size=opt.batch_size, shuffle=(train_sampler is None),
         num_workers=opt.num_workers, pin_memory=True, sampler=train_sampler)
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=256, shuffle=False,
-        num_workers=8, pin_memory=True)
+        val_dataset, batch_size=opt.batch_size, shuffle=False,
+        num_workers=opt.num_workers, pin_memory=True)
 
     return train_loader, val_loader
 
@@ -201,10 +206,11 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
     top1 = AverageMeter()
 
     end = time.time()
-    for idx, (images, labels) in enumerate(train_loader):
+    for idx, (descriptions, images, labels) in enumerate(train_loader):
         data_time.update(time.time() - end)
 
         images = images.cuda(non_blocking=True)
+        labels = torch.as_tensor(labels)
         labels = labels.cuda(non_blocking=True)
         bsz = labels.shape[0]
 
@@ -253,7 +259,7 @@ def validate(val_loader, model, criterion, opt):
 
     with torch.no_grad():
         end = time.time()
-        for idx, (images, labels) in enumerate(val_loader):
+        for idx, (descriptions, images, labels) in enumerate(val_loader):
             images = images.float().cuda()
             labels = labels.cuda()
             bsz = labels.shape[0]
