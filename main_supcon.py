@@ -47,7 +47,7 @@ def parse_option():
     # optimization
     parser.add_argument('--learning_rate', type=float, default=0.05,
                         help='learning rate')
-    parser.add_argument('--lr_decay_epochs', type=str, default='700,800,900',
+    parser.add_argument('--lr_decay_epochs', type=str, default='5,10,15,20',
                         help='where to decay lr, can be a list')
     parser.add_argument('--lr_decay_rate', type=float, default=0.1,
                         help='decay rate for learning rate')
@@ -197,7 +197,6 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
         if torch.cuda.is_available():
             images = images.cuda(non_blocking=True)
 
-            # labels = F.one_hot(labels)
             labels = torch.as_tensor(labels)
             labels = labels.cuda(non_blocking=True)
 
