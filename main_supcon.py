@@ -164,7 +164,7 @@ def set_loader(opt):
 
 
 def set_model(opt):
-    model = SupConResNet(name=opt.model)
+    model = SupConResNet(name=opt.model, head="linear")
     criterion = SupConLoss(temperature=opt.temp)
 
     # enable synchronized Batch Normalization

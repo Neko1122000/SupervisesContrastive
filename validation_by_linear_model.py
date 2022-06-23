@@ -115,10 +115,10 @@ def parse_option():
 
 
 def set_model(opt):
-    model = SupConResNet(name=opt.model)
+    model = SupConResNet(name=opt.model, head="linear")
     criterion = torch.nn.CrossEntropyLoss()
 
-    classifier = LinearClassifier(name=opt.model, num_classes=opt.n_cls)
+    classifier = LinearClassifier(name=opt.model, num_classes=opt.n_cls, head="mlp")
 
     ckpt = torch.load(opt.ckpt, map_location='cpu')
     state_dict = ckpt['model']

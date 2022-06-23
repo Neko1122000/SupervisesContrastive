@@ -16,6 +16,11 @@ from util import adjust_learning_rate, warmup_learning_rate, accuracy
 from util import set_optimizer, save_model
 from networks.resnet_big import SupCEResNet
 
+from custom_dataset import CustomDataset
+
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
+
 try:
     import apex
     from apex import amp, optimizers
@@ -65,13 +70,15 @@ def parse_option():
     parser.add_argument('--trial', type=str, default='0',
                         help='id for recording multiple runs')
 
+    parser.add_argument('--size', type=int, default=64, help='parameter for RandomResizedCrop')
+
     opt = parser.parse_args()
 
     # set the path according to the environment
     if opt.data_folder is None:
         opt.data_folder = './data/food_dataset/'
-    opt.model_path = './save/SupCon/{}_models'.format(opt.dataset)
-    opt.tb_path = './save/SupCon/{}_tensorboard'.format(opt.dataset)
+    opt.model_path = './save/CE/{}_models'.format(opt.dataset)
+    opt.tb_path = './save/CE/{}_tensorboard'.format(opt.dataset)
 
     iterations = opt.lr_decay_epochs.split(',')
     opt.lr_decay_epochs = list([])
@@ -112,7 +119,7 @@ def parse_option():
     elif opt.dataset == 'cifar100':
         opt.n_cls = 100
     elif opt.dataset == 'path':
-        opt.n_cls = 11
+        opt.n_cls = 17
     else:
         raise ValueError('dataset not supported: {}'.format(opt.dataset))
 
@@ -135,13 +142,14 @@ def set_loader(opt):
     normalize = transforms.Normalize(mean=mean, std=std)
 
     train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
+        transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         normalize,
     ])
 
     val_transform = transforms.Compose([
+        transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.ToTensor(),
         normalize,
     ])
@@ -161,9 +169,12 @@ def set_loader(opt):
                                         train=False,
                                         transform=val_transform)
     elif opt.dataset == 'path':
-        image_folder = opt.data_folder+"images/train"
-        texts_data = opt.data_folder+"texts/train_titles.csv"
-        train_dataset = CustomDataset(image_folder, texts_data, transform=TwoCropTransform(train_transform))
+        image_folder = opt.data_folder + "images/train"
+        texts_data = opt.data_folder + "texts/train_titles.csv"
+        train_dataset = CustomDataset(image_folder, texts_data, transform=train_transform)
+        image_folder = opt.data_folder + "images/test"
+        texts_data = opt.data_folder + "texts/test_titles.csv"
+        val_dataset = CustomDataset(image_folder, texts_data, transform=val_transform)
     else:
         raise ValueError(opt.dataset)
 
@@ -188,7 +199,7 @@ def set_model(opt):
 
     if torch.cuda.is_available():
         if torch.cuda.device_count() > 1:
-            model = torch.nn.DataParallel(model)
+            model.encoder = torch.nn.DataParallel(model.encoder)
         model = model.cuda()
         criterion = criterion.cuda()
         cudnn.benchmark = True
@@ -218,7 +229,7 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
         warmup_learning_rate(opt, epoch, idx, len(train_loader), optimizer)
 
         # compute loss
-        output = model(images)
+        output = model(images, descriptions)
         loss = criterion(output, labels)
 
         # update metric
@@ -265,7 +276,7 @@ def validate(val_loader, model, criterion, opt):
             bsz = labels.shape[0]
 
             # forward
-            output = model(images)
+            output = model(images, descriptions)
             loss = criterion(output, labels)
 
             # update metric

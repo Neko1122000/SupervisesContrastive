@@ -167,7 +167,7 @@ class LinearBatchNorm(nn.Module):
 # Add bert model and transform sentences to vector
 class SupConResNet(nn.Module):
     """backbone + projection head"""
-    def __init__(self, name='resnet50', head='mlp', feat_dim=128, text_len=512):
+    def __init__(self, name='resnet50', head='mlp', feat_dim=384, text_len=512):
         super(SupConResNet, self).__init__()
         # Image transform
         model_fun, dim_in = model_dict[name]
@@ -189,11 +189,6 @@ class SupConResNet(nn.Module):
         self.text_dim = 384 # state of sentence bert model
         # self.description_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased", output_hidden_states = True)
         self.description_tokenizer = SentenceTransformer('paraphrase-MiniLM-L6-v2', device="cuda")
-        self.text_head = nn.Sequential(
-                            nn.Linear(self.text_dim, self.text_dim),
-                            nn.ReLU(inplace=True),
-                            nn.Linear(self.text_dim, feat_dim)
-                        )
 
     def forward(self, x, description):
         # ENCODER
@@ -209,7 +204,6 @@ class SupConResNet(nn.Module):
         if torch.cuda.is_available():
             des_feat = des_feat.cuda(non_blocking=True)
 
-        des_feat = self.text_head(des_feat)
         des_feat = F.normalize(des_feat, dim=1)
 
         feat = F.normalize(self.head(feat), dim=1)
@@ -223,20 +217,36 @@ class SupCEResNet(nn.Module):
         super(SupCEResNet, self).__init__()
         model_fun, dim_in = model_dict[name]
         self.encoder = model_fun()
+        self.description_tokenizer = SentenceTransformer('paraphrase-MiniLM-L6-v2', device="cuda")
         text_dim = 384 # state of sentence bert model
-        self.fc = nn.Linear(dim_in+text_dim, num_classes)
+        self.fc = nn.Linear(dim_in + text_dim, num_classes)
 
-    def forward(self, x):
-        return self.fc(self.encoder(x))
+    def forward(self, x, text):
+        image_feat = self.encoder(x)
+        text_feat = self.description_tokenizer.encode(text, convert_to_tensor=True,
+                                                    normalize_embeddings=True)
+
+        return self.fc(torch.cat([image_feat, text_feat], 1))
 
 
 class LinearClassifier(nn.Module):
     """Linear classifier"""
-    def __init__(self, name='resnet50', num_classes=10):
+    def __init__(self, name='resnet50', num_classes=10, head="linear"):
         super(LinearClassifier, self).__init__()
         _, feat_dim = model_dict[name]
         text_dim = 384 # state of sentence bert model
-        self.fc = nn.Linear(feat_dim+text_dim, num_classes)
+        if head == 'linear':
+            self.fc = nn.Linear(feat_dim+text_dim, num_classes)
+        elif head == 'mlp':
+            dim_in = feat_dim+text_dim
+            self.fc = nn.Sequential(
+                nn.Linear(dim_in, dim_in),
+                nn.ReLU(inplace=True),
+                nn.Linear(dim_in, num_classes)
+            )
+        else:
+            raise NotImplementedError(
+                'head not supported: {}'.format(head))
 
     def forward(self, features):
         return self.fc(features)
