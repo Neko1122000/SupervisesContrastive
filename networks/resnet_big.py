@@ -167,7 +167,7 @@ class LinearBatchNorm(nn.Module):
 # Add bert model and transform sentences to vector
 class SupConResNet(nn.Module):
     """backbone + projection head"""
-    def __init__(self, name='resnet50', head='mlp', feat_dim=384, text_len=512):
+    def __init__(self, name='resnet50', head='mlp', feat_dim=768, text_len=512):
         super(SupConResNet, self).__init__()
         # Image transform
         model_fun, dim_in = model_dict[name]
@@ -186,9 +186,9 @@ class SupConResNet(nn.Module):
 
         # Text transform
         self.text_len = text_len
-        self.text_dim = 384 # state of sentence bert model
+        self.text_dim = 768 # state of sentence bert model
         # self.description_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased", output_hidden_states = True)
-        self.description_tokenizer = SentenceTransformer('paraphrase-MiniLM-L6-v2', device="cuda")
+        self.description_tokenizer = SentenceTransformer('multi-qa-mpnet-base-cos-v1', device="cuda")
 
     def forward(self, x, description):
         # ENCODER
@@ -217,8 +217,8 @@ class SupCEResNet(nn.Module):
         super(SupCEResNet, self).__init__()
         model_fun, dim_in = model_dict[name]
         self.encoder = model_fun()
-        self.description_tokenizer = SentenceTransformer('paraphrase-MiniLM-L6-v2', device="cuda")
-        text_dim = 384 # state of sentence bert model
+        self.description_tokenizer = SentenceTransformer('multi-qa-mpnet-base-cos-v1', device="cuda")
+        text_dim = 768 # state of sentence bert model
         self.fc = nn.Linear(dim_in + text_dim, num_classes)
 
     def forward(self, x, text):
@@ -234,7 +234,7 @@ class LinearClassifier(nn.Module):
     def __init__(self, name='resnet50', num_classes=10, head="linear"):
         super(LinearClassifier, self).__init__()
         _, feat_dim = model_dict[name]
-        text_dim = 384 # state of sentence bert model
+        text_dim = 768 # state of sentence bert model
         if head == 'linear':
             self.fc = nn.Linear(feat_dim+text_dim, num_classes)
         elif head == 'mlp':
@@ -250,3 +250,41 @@ class LinearClassifier(nn.Module):
 
     def forward(self, features):
         return self.fc(features)
+
+
+class SupDualConResNet(nn.Module):
+    """backbone + projection head"""
+    def __init__(self, name='resnet50', n_classes=17):
+        super(SupDualConResNet, self).__init__()
+        # Image transform
+        model_fun, dim_in = model_dict[name]
+        self.encoder = model_fun()
+
+        # Text transform
+        self.description_tokenizer = SentenceTransformer('multi-qa-mpnet-base-cos-v1', device="cuda")
+        self.text_dim = self.description_tokenizer.get_sentence_embedding_dimension()
+
+        # Classifier
+        data = torch.ones([dim_in+self.text_dim+1, n_classes], dtype=torch.float64, device="cuda")
+        self.linear = nn.parameter.Parameter(data, requires_grad=True)
+
+    def forward(self, x, description):
+        # ENCODER
+        # Encoder image
+        feat = self.encoder(x)
+        des_feat = self.description_tokenizer.encode(description, convert_to_tensor=True,
+                                                    normalize_embeddings=True)
+
+        if torch.cuda.is_available():
+            des_feat = des_feat.cuda(non_blocking=True)
+
+        const = torch.ones([feat.shape[0], 1], dtype=torch.float64, device="cuda")
+        raw_output = torch.cat([feat, des_feat, const], dim=1)
+
+        result = {
+            "cls_feats": raw_output,
+            "label_feats": self.linear,
+            "predicts": torch.matmul(raw_output, self.linear)
+        }
+
+        return result

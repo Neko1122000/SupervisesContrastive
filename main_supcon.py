@@ -15,9 +15,9 @@ import torch.nn.functional as F
 
 from util import TwoCropTransform, AverageMeter
 from util import adjust_learning_rate, warmup_learning_rate
-from util import set_optimizer, save_model
-from networks.resnet_big import SupConResNet
-from losses import SupConLoss
+from util import set_optimizer, save_model, accuracy
+from networks.resnet_big import SupDualConResNet
+from losses import DualLoss
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
 
@@ -45,7 +45,7 @@ def parse_option():
                         help='number of training epochs')
 
     # optimization
-    parser.add_argument('--learning_rate', type=float, default=0.05,
+    parser.add_argument('--learning_rate', type=float, default=0.001,
                         help='learning rate')
     parser.add_argument('--lr_decay_epochs', type=str, default='5,10,15,20',
                         help='where to decay lr, can be a list')
@@ -58,20 +58,16 @@ def parse_option():
 
     # model dataset
     parser.add_argument('--model', type=str, default='resnet50')
-    parser.add_argument('--dataset', type=str, default='cifar10',
-                        choices=['cifar10', 'cifar100', 'path'], help='dataset')
-    # parser.add_argument('--mean', type=str, help='mean of dataset in path in form of str tuple')
-    # parser.add_argument('--std', type=str, help='std of dataset in path in form of str tuple')
+    parser.add_argument('--dataset', type=str, default='path',
+                        choices=['path'], help='dataset')
     parser.add_argument('--data_folder', type=str, default=None, help='path to custom dataset')
     parser.add_argument('--size', type=int, default=64, help='parameter for RandomResizedCrop')
 
-    # method
-    parser.add_argument('--method', type=str, default='SupCon',
-                        choices=['SupCon', 'SimCLR'], help='choose method')
-
     # temperature
-    parser.add_argument('--temp', type=float, default=0.07,
+    parser.add_argument('--temp', type=float, default=0.1,
                         help='temperature for loss function')
+    parser.add_argument('--alpha', type=float, default=0.5,
+                        help='alpha for loss function')
 
     # other setting
     parser.add_argument('--cosine', action='store_true',
@@ -88,16 +84,16 @@ def parse_option():
     # set the path according to the environment
     if opt.data_folder is None:
         opt.data_folder = './data/food_dataset/'
-    opt.model_path = './model/SupConst/save/SupCon/{}_models'.format(opt.dataset)
-    opt.tb_path = './model/SupConst/save/SupCon/{}_tensorboard'.format(opt.dataset)
+    opt.model_path = './modelDualLoss/SupConst/save/SupCon/{}_models'.format(opt.dataset)
+    opt.tb_path = './modelDualLoss/SupConst/save/SupCon/{}_tensorboard'.format(opt.dataset)
 
     iterations = opt.lr_decay_epochs.split(',')
     opt.lr_decay_epochs = list([])
     for it in iterations:
         opt.lr_decay_epochs.append(int(it))
 
-    opt.model_name = '{}_{}_{}_lr_{}_decay_{}_size_{}_temp_{}_trial_{}'.\
-        format(opt.method, opt.dataset, opt.model, opt.learning_rate,
+    opt.model_name = '{}_{}_lr_{}_decay_{}_size_{}_temp_{}_trial_{}'.\
+        format(opt.dataset, opt.model, opt.learning_rate,
                opt.weight_decay, opt.size, opt.temp, opt.trial)
 
     if opt.cosine:
@@ -138,6 +134,7 @@ def set_loader(opt):
     normalize = transforms.Normalize(mean=mean, std=std)
 
     train_transform = transforms.Compose([
+        transforms.Resize(size=(opt.size, opt.size)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomApply([
@@ -148,24 +145,37 @@ def set_loader(opt):
         normalize,
     ])
 
+    validation_transform = transforms.Compose([
+        transforms.Resize(size=(opt.size, opt.size)),
+        transforms.ToTensor(),
+        normalize,
+    ])
+
     if opt.dataset == 'path':
         image_folder = opt.data_folder+"images/train"
         texts_data = opt.data_folder+"texts/train_titles.csv"
         train_dataset = CustomDataset(image_folder, texts_data, transform=TwoCropTransform(train_transform))
+
+        image_folder = opt.data_folder + "images/test"
+        texts_data = opt.data_folder + "texts/test_titles.csv"
+        val_dataset = CustomDataset(image_folder, texts_data, transform=validation_transform)
     else:
         raise ValueError(opt.dataset)    
 
-    train_sampler = None
     train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=opt.batch_size, shuffle=(train_sampler is None),
-        num_workers=opt.num_workers, pin_memory=True, sampler=train_sampler)
+        train_dataset, batch_size=opt.batch_size, shuffle=True,
+        num_workers=opt.num_workers, pin_memory=True, sampler=None)
 
-    return train_loader
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=opt.batch_size, shuffle=False,
+        num_workers=opt.num_workers, pin_memory=True)
+
+    return train_loader, val_loader
 
 
 def set_model(opt):
-    model = SupConResNet(name=opt.model, head="linear")
-    criterion = SupConLoss(temperature=opt.temp)
+    model = SupDualConResNet(name=opt.model)
+    criterion = DualLoss(alpha=opt.alpha, temp=opt.temp)
 
     # enable synchronized Batch Normalization
     if opt.syncBN:
@@ -188,37 +198,34 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    top1 = AverageMeter()
 
     end = time.time()
     for idx, (descriptions, images, labels) in enumerate(train_loader):
         data_time.update(time.time() - end)
 
-        images = torch.cat([images[0], images[1]], dim=0)
         if torch.cuda.is_available():
-            images = images.cuda(non_blocking=True)
-
-            labels = torch.as_tensor(labels)
+            images[0] = images[0].cuda(non_blocking=True)
+            images[1] = images[1].cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
 
         bsz = labels.shape[0]
+        images_2 = torch.cat([images[0], images[1]], dim=0)
+        descriptions_2 = descriptions + descriptions
+        labels = torch.cat([labels, labels], dim=0)
 
         # warm-up learning rate
         warmup_learning_rate(opt, epoch, idx, len(train_loader), optimizer)
 
         # compute loss
-        features, text_features = model(images, descriptions)
-        f1, f2 = torch.split(features, [bsz, bsz], dim=0)
-        features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1), text_features.unsqueeze(1)], dim=1)
-        if opt.method == 'SupCon':
-            loss = criterion(features, labels)
-        elif opt.method == 'SimCLR':
-            loss = criterion(features)
-        else:
-            raise ValueError('contrastive method not supported: {}'.
-                             format(opt.method))
+        outputs = model(images_2, descriptions_2)
+        loss = criterion(outputs, labels)
 
         # update metric
         losses.update(loss.item(), bsz)
+
+        acc1, acc5 = accuracy(outputs["predicts"], labels, topk=(1, 5))
+        top1.update(acc1[0], bsz)
 
         # SGD
         optimizer.zero_grad()
@@ -234,19 +241,61 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
             print('Train: [{0}][{1}/{2}]\t'
                   'BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'loss {loss.val:.3f} ({loss.avg:.3f})'.format(
+                  'loss {loss.val:.3f} ({loss.avg:.3f}) acc {top1.val:.3f} ({top1.avg:.3f})'.format(
                    epoch, idx + 1, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses))
+                   data_time=data_time, loss=losses, top1=top1))
             sys.stdout.flush()
 
     return losses.avg
 
 
+def validate(val_loader, model, criterion, opt):
+    model.eval()
+
+    batch_time = AverageMeter()
+    losses = AverageMeter()
+    top1 = AverageMeter()
+
+    with torch.no_grad():
+        end = time.time()
+        for idx, (descriptions, images, labels) in enumerate(val_loader):
+            if torch.cuda.is_available():
+                images = images.cuda(non_blocking=True)
+                labels = labels.cuda(non_blocking=True)
+
+            bsz = labels.shape[0]
+
+            # forward
+            output = model(images, descriptions)
+            loss = criterion(output, labels)
+
+            # update metric
+            losses.update(loss.item(), bsz)
+            acc1, acc5 = accuracy(output["predicts"], labels, topk=(1, 5))
+            top1.update(acc1[0], bsz)
+
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            if idx % opt.print_freq == 0:
+                print('Test: [{0}/{1}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
+                    idx, len(val_loader), batch_time=batch_time,
+                    loss=losses, top1=top1))
+
+    print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
+    return losses.avg, top1.avg
+
+
 def main():
+    best_acc = 0
     opt = parse_option()
 
     # build data loader
-    train_loader = set_loader(opt)
+    train_loader, val_loader = set_loader(opt)
 
     # build model and criterion
     model, criterion = set_model(opt)
@@ -271,6 +320,13 @@ def main():
         logger.log_value('loss', loss, epoch)
         logger.log_value('learning_rate', optimizer.param_groups[0]['lr'], epoch)
 
+        loss, val_acc = validate(val_loader, model, criterion, opt)
+        logger.log_value('val_loss', loss, epoch)
+        logger.log_value('val_acc', val_acc, epoch)
+
+        if val_acc > best_acc:
+            best_acc = val_acc
+
         if epoch % opt.save_freq == 0:
             save_file = os.path.join(
                 opt.save_folder, 'ckpt_epoch_{epoch}.pth'.format(epoch=epoch))
@@ -279,6 +335,8 @@ def main():
     # save the last model
     save_file = os.path.join(opt.save_folder, 'last.pth')
     save_model(model, optimizer, opt, opt.epochs, save_file)
+
+    print('best accuracy: {:.2f}'.format(best_acc))
 
 
 if __name__ == '__main__':

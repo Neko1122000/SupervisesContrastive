@@ -3,4 +3,6 @@
 /.vscode/
 /data
 /model
+/modelDualLoss
 /save
+**.log
