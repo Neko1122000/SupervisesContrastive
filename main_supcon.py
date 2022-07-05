@@ -19,7 +19,7 @@ from util import set_optimizer, save_model, accuracy
 from networks.resnet_big import SupDualConResNet
 from losses import DualLoss, SupConLoss
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 from custom_dataset import CustomDataset
 

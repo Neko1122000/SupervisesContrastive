@@ -59,7 +59,7 @@ def parse_option():
     # model dataset
     parser.add_argument('--model', type=str, default='resnet50')
     parser.add_argument('--dataset', type=str, default='path',
-                        choices=['cifar10', 'cifar100', 'path'], help='dataset')
+                        choices=['path'], help='dataset')
     parser.add_argument('--data_folder', type=str, default=None, help='path to custom dataset')
 
     # other setting

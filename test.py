@@ -1,10 +1,11 @@
 from sentence_transformers import SentenceTransformer
-from networks.res import model_dict
+from networks.resnet_big import model_dict
 
 import tensorboard_logger as tb_logger
 import torch
+from torch import nn
 import torch.backends.cudnn as cudnn
-from torchvision import datasets
+from torchvision import transforms
 
 from util import AverageMeter
 from util import adjust_learning_rate, warmup_learning_rate, accuracy
@@ -12,8 +13,11 @@ from util import set_optimizer, save_model
 
 from custom_dataset import CustomDataset
 
+import argparse
+import time
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
+import sys
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 try:
     import apex
@@ -51,10 +55,17 @@ def parse_option():
                         help='momentum')
 
     # other setting
-    parser.add_argument('--trial', type=str, default='0',
-                        help='id for recording multiple runs')
+    parser.add_argument('--trial', type=str, default='0', help='id for recording multiple runs')
     parser.add_argument('--type', type=str, default='text')
     parser.add_argument('--size', type=int, default=200)
+    parser.add_argument('--syncBN', action='store_true', help='using synchronized batch normalization')
+    parser.add_argument('--warm', action='store_true', help='warm-up for large batch training')
+    parser.add_argument('--cosine', action='store_true', help='using cosine annealing')
+
+    # data
+    parser.add_argument('--model', type=str, default='resnet50')
+    parser.add_argument('--dataset', type=str, default='path', choices=['path'], help='dataset')
+    parser.add_argument('--data_folder', type=str, default=None, help='path to custom dataset')
 
     opt = parser.parse_args()
 
@@ -116,10 +127,10 @@ def set_loader(opt):
     if opt.dataset == 'path':
         image_folder = opt.data_folder + "images/train"
         texts_data = opt.data_folder + "texts/train_titles.csv"
-        train_dataset = CustomDataset(image_folder, texts_data, transform=train_transform)
+        train_dataset = CustomDataset(image_folder, texts_data, transform=transform)
         image_folder = opt.data_folder + "images/test"
         texts_data = opt.data_folder + "texts/test_titles.csv"
-        val_dataset = CustomDataset(image_folder, texts_data, transform=val_transform)
+        val_dataset = CustomDataset(image_folder, texts_data, transform=transform)
     else:
         raise ValueError(opt.dataset)
 
@@ -136,12 +147,12 @@ def set_loader(opt):
 
 class textClassifier(nn.Module):
     def __init__(self, num_classes=17):
-        super(SupCEResNet, self).__init__()
+        super(textClassifier, self).__init__()
         self.description_tokenizer = SentenceTransformer('multi-qa-mpnet-base-cos-v1', device="cuda")
         text_dim = self.description_tokenizer.get_sentence_embedding_dimension()
         self.fc = nn.Linear(text_dim, num_classes)
 
-    def forward(self, x, text):
+    def forward(self, text):
         text_feat = self.description_tokenizer.encode(text, convert_to_tensor=True,
                                                     normalize_embeddings=True)
 
@@ -151,12 +162,12 @@ class textClassifier(nn.Module):
 class imageClassifier(nn.Module):
     """encoder + classifier"""
     def __init__(self, model_name="resnet50", num_classes=17):
-        super(SupCEResNet, self).__init__()
-        model_fun, dim_in = model_dict[name]
+        super(imageClassifier, self).__init__()
+        model_fun, dim_in = model_dict[model_name]
         self.encoder = model_fun()
         self.fc = nn.Linear(dim_in, num_classes)
 
-    def forward(self, x, text):
+    def forward(self, x):
         image_feat = self.encoder(x)
 
         return self.fc(image_feat)
