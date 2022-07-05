@@ -9,7 +9,7 @@ import math
 import tensorboard_logger as tb_logger
 import torch
 import torch.backends.cudnn as cudnn
-from torchvision import transforms, datasets
+from torchvision import transforms
 
 from util import AverageMeter
 from util import adjust_learning_rate, warmup_learning_rate, accuracy
@@ -41,6 +41,8 @@ def parse_option():
                         help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=500,
                         help='number of training epochs')
+    parser.add_argument('--n_epochs_stop', type=int, default=5,
+                        help='number of no improved epochs before stop')
 
     # optimization
     parser.add_argument('--learning_rate', type=float, default=0.2,
@@ -128,53 +130,26 @@ def parse_option():
 
 def set_loader(opt):
     # construct data loader
-    if opt.dataset == 'cifar10':
-        mean = (0.4914, 0.4822, 0.4465)
-        std = (0.2023, 0.1994, 0.2010)
-    elif opt.dataset == 'cifar100':
-        mean = (0.5071, 0.4867, 0.4408)
-        std = (0.2675, 0.2565, 0.2761)
-    elif opt.dataset == 'path':
+    if opt.dataset == 'path':
         mean = (0.5071, 0.4867, 0.4408)
         std = (0.2675, 0.2565, 0.2761)
     else:
         raise ValueError('dataset not supported: {}'.format(opt.dataset))
     normalize = transforms.Normalize(mean=mean, std=std)
 
-    train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
-        transforms.RandomHorizontalFlip(),
+    transform = transforms.Compose([
+        transforms.Resize(size=(opt.size, opt.size)),
         transforms.ToTensor(),
         normalize,
     ])
 
-    val_transform = transforms.Compose([
-        transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
-        transforms.ToTensor(),
-        normalize,
-    ])
-
-    if opt.dataset == 'cifar10':
-        train_dataset = datasets.CIFAR10(root=opt.data_folder,
-                                         transform=train_transform,
-                                         download=True)
-        val_dataset = datasets.CIFAR10(root=opt.data_folder,
-                                       train=False,
-                                       transform=val_transform)
-    elif opt.dataset == 'cifar100':
-        train_dataset = datasets.CIFAR100(root=opt.data_folder,
-                                          transform=train_transform,
-                                          download=True)
-        val_dataset = datasets.CIFAR100(root=opt.data_folder,
-                                        train=False,
-                                        transform=val_transform)
-    elif opt.dataset == 'path':
+    if opt.dataset == 'path':
         image_folder = opt.data_folder + "images/train"
         texts_data = opt.data_folder + "texts/train_titles.csv"
-        train_dataset = CustomDataset(image_folder, texts_data, transform=train_transform)
+        train_dataset = CustomDataset(image_folder, texts_data, transform=transform)
         image_folder = opt.data_folder + "images/test"
         texts_data = opt.data_folder + "texts/test_titles.csv"
-        val_dataset = CustomDataset(image_folder, texts_data, transform=val_transform)
+        val_dataset = CustomDataset(image_folder, texts_data, transform=transform)
     else:
         raise ValueError(opt.dataset)
 
@@ -302,6 +277,7 @@ def validate(val_loader, model, criterion, opt):
 
 def main():
     best_acc = 0
+    epochs_no_improve = 0
     opt = parse_option()
 
     # build data loader
@@ -338,6 +314,15 @@ def main():
 
         if val_acc > best_acc:
             best_acc = val_acc
+            epochs_no_improve = 0
+            # save the best model
+            save_file = os.path.join(opt.save_folder, 'last.pth')
+            save_model(model, optimizer, opt, opt.epochs, save_file)
+        else:
+            epochs_no_improve += 1
+        if epoch > 5 and epochs_no_improve == opt.n_epochs_stop:
+            print('Early stopping!')
+            break
 
         if epoch % opt.save_freq == 0:
             save_file = os.path.join(

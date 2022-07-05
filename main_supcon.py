@@ -17,7 +17,7 @@ from util import TwoCropTransform, AverageMeter
 from util import adjust_learning_rate, warmup_learning_rate
 from util import set_optimizer, save_model, accuracy
 from networks.resnet_big import SupDualConResNet
-from losses import DualLoss
+from losses import DualLoss, SupConLoss
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
 
@@ -43,6 +43,8 @@ def parse_option():
                         help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=1000,
                         help='number of training epochs')
+    parser.add_argument('--n_epochs_stop', type=int, default=5,
+                        help='number of no improved epochs before stop')
 
     # optimization
     parser.add_argument('--learning_rate', type=float, default=0.001,
@@ -64,7 +66,7 @@ def parse_option():
     parser.add_argument('--size', type=int, default=64, help='parameter for RandomResizedCrop')
 
     # temperature
-    parser.add_argument('--temp', type=float, default=0.1,
+    parser.add_argument('--temp', type=float, default=0.07,
                         help='temperature for loss function')
     parser.add_argument('--alpha', type=float, default=0.5,
                         help='alpha for loss function')
@@ -176,6 +178,8 @@ def set_loader(opt):
 def set_model(opt):
     model = SupDualConResNet(name=opt.model)
     criterion = DualLoss(alpha=opt.alpha, temp=opt.temp)
+    # criterion = SupConLoss(alpha=opt.alpha, temp=opt.temp)
+
 
     # enable synchronized Batch Normalization
     if opt.syncBN:
@@ -213,6 +217,7 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
         images_2 = torch.cat([images[0], images[1]], dim=0)
         descriptions_2 = descriptions + descriptions
         labels = torch.cat([labels, labels], dim=0)
+        bsz *= 2
 
         # warm-up learning rate
         warmup_learning_rate(opt, epoch, idx, len(train_loader), optimizer)
@@ -241,7 +246,8 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
             print('Train: [{0}][{1}/{2}]\t'
                   'BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'loss {loss.val:.3f} ({loss.avg:.3f}) acc {top1.val:.3f} ({top1.avg:.3f})'.format(
+                  'loss {loss.val:.3f} ({loss.avg:.3f})\t'
+                  'acc {top1.val:.3f} ({top1.avg:.3f})'.format(
                    epoch, idx + 1, len(train_loader), batch_time=batch_time,
                    data_time=data_time, loss=losses, top1=top1))
             sys.stdout.flush()
@@ -292,6 +298,7 @@ def validate(val_loader, model, criterion, opt):
 
 def main():
     best_acc = 0
+    epochs_no_improve = 0
     opt = parse_option()
 
     # build data loader
@@ -326,15 +333,20 @@ def main():
 
         if val_acc > best_acc:
             best_acc = val_acc
+            epochs_no_improve = 0
+            # save the best model
+            save_file = os.path.join(opt.save_folder, 'last.pth')
+            save_model(model, optimizer, opt, opt.epochs, save_file)
+        else:
+            epochs_no_improve += 1
+        if epoch > 5 and epochs_no_improve == opt.n_epochs_stop:
+            print('Early stopping!')
+            break
 
         if epoch % opt.save_freq == 0:
             save_file = os.path.join(
                 opt.save_folder, 'ckpt_epoch_{epoch}.pth'.format(epoch=epoch))
             save_model(model, optimizer, opt, epoch, save_file)
-
-    # save the last model
-    save_file = os.path.join(opt.save_folder, 'last.pth')
-    save_model(model, optimizer, opt, opt.epochs, save_file)
 
     print('best accuracy: {:.2f}'.format(best_acc))
 
