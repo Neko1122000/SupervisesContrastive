@@ -136,19 +136,18 @@ def set_loader(opt):
     normalize = transforms.Normalize(mean=mean, std=std)
 
     train_transform = transforms.Compose([
-        transforms.Resize(size=(opt.size, opt.size)),
+        transforms.Resize(size=(200, 200)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomApply([
             transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
         ], p=0.8),
-        transforms.RandomGrayscale(p=0.2),
         transforms.ToTensor(),
         normalize,
     ])
 
     validation_transform = transforms.Compose([
-        transforms.Resize(size=(opt.size, opt.size)),
+        transforms.Resize(size=(200, 200)),
         transforms.ToTensor(),
         normalize,
     ])

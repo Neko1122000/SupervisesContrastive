@@ -177,26 +177,24 @@ class SupDualConResNet(nn.Module):
         # Image transform
         model_fun, dim_in = model_dict[name]
         self.encoder = model_fun()
-        # dim_in = 2048
-        # self.encoder = torch_resnet50(pretrained=True)
-        # self.encoder.fc = nn.Linear(in_features=dim_in, out_features=dim_in)
-        # # finetune pretrained resnet model
-        # for param in self.encoder.parameters():
-        #     param.requires_grad = True
 
         # Text transform
         self.description_tokenizer = SentenceTransformer('multi-qa-mpnet-base-cos-v1', device="cuda")
         self.text_dim = self.description_tokenizer.get_sentence_embedding_dimension()
 
+        self.text_layer = nn.Sequential(
+            nn.Linear(self.text_dim, 128),
+            nn.LeakyReLU(0.1)
+        )
+
+        self.image_layer = nn.Sequential(
+            nn.Linear(dim_in, 128),
+            nn.LeakyReLU(0.1),
+        )
+
         # Classifier
-        # hidden_dim = 1024
-        # data = torch.empty([dim_in+self.text_dim+1, hidden_dim], dtype=torch.float64, device="cuda")
-        # torch.nn.init.xavier_normal_(data)
-        # self.linear = nn.parameter.Parameter(data, requires_grad=True)
-        # data_2 = torch.empty([hidden_dim, n_classes], dtype=torch.float64, device="cuda")
-        # torch.nn.init.xavier_normal_(data_2)
-        # self.classifier = nn.parameter.Parameter(data_2, requires_grad=True)
-        data_2 = torch.ones([dim_in+self.text_dim+1, n_classes], dtype=torch.float64, device="cuda")
+        data_2 = torch.ones([128*2, n_classes], dtype=torch.float64, device="cuda")
+        torch.nn.init.xavier_normal_(data_2)
         self.classifier = nn.parameter.Parameter(data_2, requires_grad=True)
         
 
@@ -204,22 +202,27 @@ class SupDualConResNet(nn.Module):
         # ENCODER
         # Encoder image
         feat = self.encoder(x)
+        feat = self.image_layer(feat)
+
         des_feat = self.description_tokenizer.encode(description, convert_to_tensor=True,
                                                     normalize_embeddings=True)
+        des_feat = self.text_layer(des_feat)
+
+
+        # Multi modal
+        weight = torch.mul(feat, des_feat)
+        weight = F.softmax(weight, dim=0)
+        context_images_vector = torch.mul(feat, weight)
 
         if torch.cuda.is_available():
             des_feat = des_feat.cuda(non_blocking=True)
 
-        const = torch.ones([feat.shape[0], 1], dtype=torch.float64, device="cuda")
-        raw_output = torch.cat([feat, des_feat, const], dim=1)
-
-        # raw_output = torch.matmul(raw_output, self.linear)
-        # raw_output = F.relu(raw_output)
+        raw_output = torch.cat([context_images_vector, des_feat], dim=1)
 
         result = {
             "cls_feats": raw_output,
             "label_feats": self.classifier,
-            "predicts": torch.matmul(raw_output, self.classifier)
+            "predicts": torch.matmul(raw_output.double(), self.classifier)
         }
 
         return result
