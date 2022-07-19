@@ -182,37 +182,53 @@ class SupDualConResNet(nn.Module):
         self.description_tokenizer = SentenceTransformer('multi-qa-mpnet-base-cos-v1', device="cuda")
         self.text_dim = self.description_tokenizer.get_sentence_embedding_dimension()
 
-        self.text_layer = nn.Sequential(
-            nn.Linear(self.text_dim, 128),
-            nn.LeakyReLU(0.1)
-        )
+        # self.text_layer = nn.Sequential(
+        #     nn.Linear(self.text_dim, 128),
+        #     nn.LeakyReLU(0.1)
+        # )
 
-        self.image_layer = nn.Sequential(
-            nn.Linear(dim_in, 128),
-            nn.LeakyReLU(0.1),
-        )
+        # self.image_layer = nn.Sequential(
+        #     nn.Linear(dim_in, 128),
+        #     nn.LeakyReLU(0.1),
+        # )
 
         # Classifier
-        data_2 = torch.ones([128*2, n_classes], dtype=torch.float64, device="cuda")
+        data_2 = torch.ones([self.text_dim*2, n_classes], dtype=torch.float64, device="cuda")
         torch.nn.init.xavier_normal_(data_2)
         self.classifier = nn.parameter.Parameter(data_2, requires_grad=True)
+
+
+    @staticmethod
+    def scale_dot_product_attention(image_feature, text_feature):
+        batch_size = image_feature.shape[0]
+        result = torch.empty(text_feature.shape)
+        if torch.cuda.is_available():
+            result = result.cuda(non_blocking=True)
+
+        for i in range(batch_size):
+            outputs = torch.matmul(torch.unsqueeze(image_feature[i], dim=1), 
+                                    torch.unsqueeze(text_feature[i], dim=0))
+            outputs = F.softmax(outputs, dim=1)
+
+            value = torch.matmul(image_feature[i], outputs)
+            result[i] = value
+        
+        return result
         
 
     def forward(self, x, description):
         # ENCODER
         # Encoder image
         feat = self.encoder(x)
-        feat = self.image_layer(feat)
+        # feat = self.image_layer(feat)
 
         des_feat = self.description_tokenizer.encode(description, convert_to_tensor=True,
                                                     normalize_embeddings=True)
-        des_feat = self.text_layer(des_feat)
+        # des_feat = self.text_layer(des_feat)
 
 
         # Multi modal
-        weight = torch.mul(feat, des_feat)
-        weight = F.softmax(weight, dim=0)
-        context_images_vector = torch.mul(feat, weight)
+        context_images_vector = SupDualConResNet.scale_dot_product_attention(feat, des_feat)
 
         if torch.cuda.is_available():
             des_feat = des_feat.cuda(non_blocking=True)
