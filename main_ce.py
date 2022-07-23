@@ -121,7 +121,7 @@ def parse_option():
     elif opt.dataset == 'cifar100':
         opt.n_cls = 100
     elif opt.dataset == 'path':
-        opt.n_cls = 17
+        opt.n_cls = 10
     else:
         raise ValueError('dataset not supported: {}'.format(opt.dataset))
 
@@ -276,7 +276,7 @@ def validate(val_loader, model, criterion, opt):
 
 
 def main():
-    best_acc = 0
+    best_acc = 99999
     epochs_no_improve = 0
     opt = parse_option()
 
@@ -312,8 +312,8 @@ def main():
         logger.log_value('val_loss', loss, epoch)
         logger.log_value('val_acc', val_acc, epoch)
 
-        if val_acc > best_acc:
-            best_acc = val_acc
+        if loss < best_loss:
+            best_loss = loss
             epochs_no_improve = 0
             # save the best model
             save_file = os.path.join(opt.save_folder, 'last.pth')
@@ -329,12 +329,21 @@ def main():
                 opt.save_folder, 'ckpt_epoch_{epoch}.pth'.format(epoch=epoch))
             save_model(model, optimizer, opt, epoch, save_file)
 
-    # save the last model
-    save_file = os.path.join(
-        opt.save_folder, 'last.pth')
-    save_model(model, optimizer, opt, opt.epochs, save_file)
+     # result in test data
+    model_path = os.path.join(opt.save_folder, 'last.pth')
+    model_dict = torch.load(model_path, map_location='cpu')
 
-    print('best accuracy: {:.2f}'.format(best_acc))
+    state_dict = model_dict["model"]
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        k = k.replace("module.", "")
+        new_state_dict[k] = v
+    state_dict = new_state_dict
+
+    final_model = SupCEResNet(name=model_dict["opt"].model, num_classes=model_dict["opt"].n_cls)
+    final_model.load_state_dict(state_dict)
+
+    validate(test_loader, final_model, criterion, model_dict["opt"])
 
 
 if __name__ == '__main__':

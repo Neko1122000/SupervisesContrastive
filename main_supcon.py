@@ -136,7 +136,7 @@ def set_loader(opt):
     normalize = transforms.Normalize(mean=mean, std=std)
 
     train_transform = transforms.Compose([
-        # transforms.Resize(size=(150, 150)),
+        transforms.Resize(size=(200, 200)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomApply([
@@ -161,6 +161,7 @@ def set_loader(opt):
         image_folder = opt.data_folder + "images/test"
         texts_data = opt.data_folder + "texts/test_titles.csv"
         val_dataset = CustomDataset(image_folder, texts_data, transform=validation_transform)
+        val_dataset, test_dataset = torch.utils.data.random_split(val_dataset, [550, 550], generator=torch.Generator().manual_seed(42))
     else:
         raise ValueError(opt.dataset)    
 
@@ -172,7 +173,11 @@ def set_loader(opt):
         val_dataset, batch_size=opt.batch_size, shuffle=False,
         num_workers=opt.num_workers, pin_memory=True)
 
-    return train_loader, val_loader
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=opt.batch_size, shuffle=False,
+        num_workers=opt.num_workers, pin_memory=True)
+
+    return train_loader, val_loader, test_loader
 
 
 def set_model(opt):
@@ -292,17 +297,17 @@ def validate(val_loader, model, criterion, opt):
                     idx, len(val_loader), batch_time=batch_time,
                     loss=losses, top1=top1))
 
-    print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
+    print(' * Loss {loss.avg:.3f}'.format(loss=losses))
     return losses.avg, top1.avg
 
 
 def main():
-    best_acc = 0
+    best_loss = 99999
     epochs_no_improve = 0
     opt = parse_option()
 
     # build data loader
-    train_loader, val_loader = set_loader(opt)
+    train_loader, val_loader, test_loader = set_loader(opt)
 
     # build model and criterion
     model, criterion = set_model(opt)
@@ -331,8 +336,8 @@ def main():
         logger.log_value('val_loss', loss, epoch)
         logger.log_value('val_acc', val_acc, epoch)
 
-        if val_acc > best_acc:
-            best_acc = val_acc
+        if loss < best_loss:
+            best_loss = loss
             epochs_no_improve = 0
             # save the best model
             save_file = os.path.join(opt.save_folder, 'last.pth')
@@ -348,7 +353,22 @@ def main():
                 opt.save_folder, 'ckpt_epoch_{epoch}.pth'.format(epoch=epoch))
             save_model(model, optimizer, opt, epoch, save_file)
 
-    print('best accuracy: {:.2f}'.format(best_acc))
+    # result in test data
+    model_path = os.path.join(opt.save_folder, 'last.pth')
+    model_dict = torch.load(model_path, map_location='cpu')
+
+    state_dict = model_dict["model"]
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        k = k.replace("module.", "")
+        new_state_dict[k] = v
+    state_dict = new_state_dict
+
+    final_model = SupDualConResNet(name=model_dict["opt"].model)
+    final_model = final_model.cuda()
+    final_model.load_state_dict(state_dict)
+
+    validate(test_loader, final_model, criterion, model_dict["opt"])
 
 
 if __name__ == '__main__':
