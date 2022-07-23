@@ -10,7 +10,10 @@ import torch.nn.functional as F
 from torchvision.models import resnet50 as torch_resnet50
 
 # from transformers import BertTokenizer
-from sentence_transformers import SentenceTransformer
+import sys
+sys.path.insert(0, '/home/trongld/SupervisesContrastive/pre_train/sentence-transformers')
+
+from sentence_transformers.SentenceTransformer import SentenceTransformer
 
 
 class BasicBlock(nn.Module):
@@ -158,14 +161,14 @@ class SupCEResNet(nn.Module):
         super(SupCEResNet, self).__init__()
         model_fun, dim_in = model_dict[name]
         self.encoder = model_fun()
-        self.description_tokenizer = SentenceTransformer('multi-qa-mpnet-base-cos-v1', device="cuda")
+        model_path = "/home/trongld/SupervisesContrastive/pre_train/vn_sbert_deploy/phobert_base_mean_tokens_NLI_STS"
+        self.description_tokenizer = SentenceTransformer(model_path, device="cuda")
         text_dim = self.description_tokenizer.get_sentence_embedding_dimension()
         self.fc = nn.Linear(dim_in + text_dim, num_classes)
 
     def forward(self, x, text):
         image_feat = self.encoder(x)
-        text_feat = self.description_tokenizer.encode(text, convert_to_tensor=True,
-                                                    normalize_embeddings=True)
+        text_feat = self.description_tokenizer.encode(text)
 
         return self.fc(torch.cat([image_feat, text_feat], 1))
 
@@ -179,7 +182,8 @@ class SupDualConResNet(nn.Module):
         self.encoder = model_fun()
 
         # Text transform
-        self.description_tokenizer = SentenceTransformer('multi-qa-mpnet-base-cos-v1', device="cuda")
+        model_path = "/home/trongld/SupervisesContrastive/pre_train/vn_sbert_deploy/phobert_base_mean_tokens_NLI_STS"
+        self.description_tokenizer = SentenceTransformer(model_path, device="cuda")
         self.text_dim = self.description_tokenizer.get_sentence_embedding_dimension()
 
         # self.text_layer = nn.Sequential(
@@ -222,16 +226,14 @@ class SupDualConResNet(nn.Module):
         feat = self.encoder(x)
         # feat = self.image_layer(feat)
 
-        des_feat = self.description_tokenizer.encode(description, convert_to_tensor=True,
-                                                    normalize_embeddings=True)
+        des_feat = self.description_tokenizer.encode(description)
         # des_feat = self.text_layer(des_feat)
 
+        if torch.cuda.is_available():
+            des_feat = torch.tensor(des_feat, dtype=torch.float, device="cuda")
 
         # Multi modal
         context_images_vector = SupDualConResNet.scale_dot_product_attention(feat, des_feat)
-
-        if torch.cuda.is_available():
-            des_feat = des_feat.cuda(non_blocking=True)
 
         raw_output = torch.cat([context_images_vector, des_feat], dim=1)
 

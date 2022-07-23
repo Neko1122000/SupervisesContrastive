@@ -85,9 +85,9 @@ def parse_option():
 
     # set the path according to the environment
     if opt.data_folder is None:
-        opt.data_folder = './data/food_dataset/'
-    opt.model_path = './modelDualLoss/SupConst/save/SupCon/{}_models'.format(opt.dataset)
-    opt.tb_path = './modelDualLoss/SupConst/save/SupCon/{}_tensorboard'.format(opt.dataset)
+        opt.data_folder = './data/vn_food/'
+    opt.model_path = './modelDualLoss/SupConst/save/SupCon/vnfood_models'
+    opt.tb_path = './modelDualLoss/SupConst/save/SupCon/vnfood_tensorboard'
 
     iterations = opt.lr_decay_epochs.split(',')
     opt.lr_decay_epochs = list([])
