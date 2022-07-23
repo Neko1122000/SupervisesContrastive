@@ -10,7 +10,7 @@ import torch.nn.functional as F
 #             "bruschetta":10, "caesar_salad":11, "cannoli":12, "caprese_salad":13, "carrot_cake":14,
 #             "ceviche":15, "cheese_plate":16}
 
-label_dict = {"Chao long": 0, "Bun dau mam tom": 1, "Banh mi": 2, "Banh xeo": 3, "Com tam": 4
+label_dict = {"Chao long": 0, "Bun dau mam tom": 1, "Banh mi": 2, "Banh xeo": 3, "Com tam": 4,
             "Banh cuon": 5, "Goi cuon": 6, "Pho": 7, "Mi quang": 8, "Bun bo Hue": 9}
 
 
