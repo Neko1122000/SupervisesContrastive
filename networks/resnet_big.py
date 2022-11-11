@@ -7,10 +7,10 @@ Adapted from: https://github.com/bearpaw/pytorch-classification
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import resnet50 as torch_resnet50
 
 # from transformers import BertTokenizer
 import sys
+import math
 sys.path.insert(0, '/home/trongld/SupervisesContrastive/pre_train/sentence-transformers')
 
 from sentence_transformers.SentenceTransformer import SentenceTransformer
@@ -164,13 +164,43 @@ class SupCEResNet(nn.Module):
         model_path = "/home/trongld/SupervisesContrastive/pre_train/vn_sbert_deploy/phobert_base_mean_tokens_NLI_STS"
         self.description_tokenizer = SentenceTransformer(model_path, device="cuda")
         text_dim = self.description_tokenizer.get_sentence_embedding_dimension()
-        self.fc = nn.Linear(dim_in + text_dim, num_classes)
+
+        # dim = 2 * text_dim
+        dim = dim_in + text_dim
+        # dim = dim_in
+        self.fc = nn.Linear(dim, num_classes)
+
+    @staticmethod
+    def scale_dot_product_attention(image_feature, text_feature):
+        batch_size = image_feature.shape[0]
+        result = torch.empty(text_feature.shape)
+        if torch.cuda.is_available():
+            result = result.cuda(non_blocking=True)
+
+        for i in range(batch_size):
+            outputs = torch.matmul(torch.unsqueeze(image_feature[i], dim=1), 
+                                    torch.unsqueeze(text_feature[i], dim=0))
+            outputs = F.softmax(outputs, dim=1)
+
+            value = torch.matmul(image_feature[i], outputs)
+            result[i] = value
+        
+        return result
 
     def forward(self, x, text):
         image_feat = self.encoder(x)
         text_feat = self.description_tokenizer.encode(text)
+        if torch.cuda.is_available():
+            text_feat = torch.tensor(text_feat, dtype=torch.float, device="cuda")
 
-        return self.fc(torch.cat([image_feat, text_feat], 1))
+        # Multi modal
+        # context_images_vector = SupDualConResNet.scale_dot_product_attention(image_feat, text_feat)
+
+        # raw_output = image_feat
+        raw_output = torch.cat([image_feat, text_feat], dim=1)
+        # raw_output = torch.cat([context_images_vector, text_feat], dim=1)
+
+        return self.fc(raw_output)
 
 
 class SupDualConResNet(nn.Module):
@@ -188,17 +218,28 @@ class SupDualConResNet(nn.Module):
 
         # self.text_layer = nn.Sequential(
         #     nn.Linear(self.text_dim, 128),
-        #     nn.LeakyReLU(0.1)
+        #     nn.ReLU(0.1)
         # )
 
         # self.image_layer = nn.Sequential(
         #     nn.Linear(dim_in, 128),
-        #     nn.LeakyReLU(0.1),
+        #     nn.ReLU(0.1),
+        # )
+
+        # MLP classifier
+        # self.mlp = nn.Sequential(
+        #     nn.Linear(self.text_dim*2, 512),
+        #     nn.ReLU(),
+        #     nn.Linear(512, 128),
+        #     nn.ReLU()
         # )
 
         # Classifier
-        data_2 = torch.ones([self.text_dim*2, n_classes], dtype=torch.float64, device="cuda")
-        torch.nn.init.xavier_normal_(data_2)
+        dim = dim_in + self.text_dim
+        # dim = 2 * self.text_dim
+        # dim = dim_in
+        data_2 = torch.ones([dim, n_classes], dtype=torch.float64, device="cuda")
+        torch.nn.init.uniform_(data_2, a=-1./math.sqrt(dim_in), b=1./math.sqrt(dim_in))
         self.classifier = nn.parameter.Parameter(data_2, requires_grad=True)
 
 
@@ -227,15 +268,17 @@ class SupDualConResNet(nn.Module):
         # feat = self.image_layer(feat)
 
         des_feat = self.description_tokenizer.encode(description)
-        # des_feat = self.text_layer(des_feat)
-
         if torch.cuda.is_available():
             des_feat = torch.tensor(des_feat, dtype=torch.float, device="cuda")
+        # des_feat = self.text_layer(des_feat)
 
         # Multi modal
-        context_images_vector = SupDualConResNet.scale_dot_product_attention(feat, des_feat)
+        # context_images_vector = SupDualConResNet.scale_dot_product_attention(feat, des_feat)
 
-        raw_output = torch.cat([context_images_vector, des_feat], dim=1)
+        # raw_output = feat
+        # raw_output = torch.cat([context_images_vector, des_feat], dim=1)
+        raw_output = torch.cat([feat, des_feat], dim=1)
+        # raw_output = self.mlp(raw_output)
 
         result = {
             "cls_feats": raw_output,

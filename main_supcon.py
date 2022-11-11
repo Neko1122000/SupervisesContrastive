@@ -19,7 +19,7 @@ from util import set_optimizer, save_model, accuracy
 from networks.resnet_big import SupDualConResNet
 from losses import DualLoss, SupConLoss
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,4"
 
 from custom_dataset import CustomDataset
 
@@ -136,13 +136,13 @@ def set_loader(opt):
     normalize = transforms.Normalize(mean=mean, std=std)
 
     train_transform = transforms.Compose([
-        transforms.Resize(size=(200, 200)),
+        # transforms.Resize(size=(200, 200)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomApply([
-            transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
-        ], p=0.8),
-        
+        # transforms.RandomApply([
+        #     transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
+        # ], p=0.5),
+        # transforms.RandomGrayScale(p=0.2),
         transforms.ToTensor(),
         normalize,
     ])
@@ -157,11 +157,12 @@ def set_loader(opt):
         image_folder = opt.data_folder+"images/train"
         texts_data = opt.data_folder+"texts/train_titles.csv"
         train_dataset = CustomDataset(image_folder, texts_data, transform=TwoCropTransform(train_transform))
+        
+        train_dataset, val_dataset = torch.utils.data.random_split(train_dataset, [3960, 440], generator=torch.Generator().manual_seed(42))
 
         image_folder = opt.data_folder + "images/test"
         texts_data = opt.data_folder + "texts/test_titles.csv"
-        val_dataset = CustomDataset(image_folder, texts_data, transform=validation_transform)
-        val_dataset, test_dataset = torch.utils.data.random_split(val_dataset, [550, 550], generator=torch.Generator().manual_seed(42))
+        test_dataset = CustomDataset(image_folder, texts_data, transform=validation_transform)
     else:
         raise ValueError(opt.dataset)    
 
@@ -260,7 +261,7 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
     return losses.avg
 
 
-def validate(val_loader, model, criterion, opt):
+def validate(val_loader, model, criterion, opt, test=False):
     model.eval()
 
     batch_time = AverageMeter()
@@ -270,11 +271,24 @@ def validate(val_loader, model, criterion, opt):
     with torch.no_grad():
         end = time.time()
         for idx, (descriptions, images, labels) in enumerate(val_loader):
-            if torch.cuda.is_available():
-                images = images.cuda(non_blocking=True)
-                labels = labels.cuda(non_blocking=True)
 
-            bsz = labels.shape[0]
+            if test:
+                if torch.cuda.is_available():
+                    images = images.cuda(non_blocking=True)
+                    labels = labels.cuda(non_blocking=True)
+
+                bsz = labels.shape[0]
+            else:
+                if torch.cuda.is_available():
+                    images[0] = images[0].cuda(non_blocking=True)
+                    images[1] = images[1].cuda(non_blocking=True)
+                    labels = labels.cuda(non_blocking=True)
+
+                bsz = labels.shape[0]
+                images = torch.cat([images[0], images[1]], dim=0)
+                descriptions = descriptions + descriptions
+                labels = torch.cat([labels, labels], dim=0)
+                bsz *= 2
 
             # forward
             output = model(images, descriptions)
@@ -298,6 +312,7 @@ def validate(val_loader, model, criterion, opt):
                     loss=losses, top1=top1))
 
     print(' * Loss {loss.avg:.3f}'.format(loss=losses))
+    print(' * Acc {acc.avg:.3f}'.format(acc=top1))
     return losses.avg, top1.avg
 
 
@@ -344,7 +359,7 @@ def main():
             save_model(model, optimizer, opt, opt.epochs, save_file)
         else:
             epochs_no_improve += 1
-        if epoch > 5 and epochs_no_improve == opt.n_epochs_stop:
+        if epoch > 10 and epochs_no_improve == opt.n_epochs_stop:
             print('Early stopping!')
             break
 
@@ -358,17 +373,21 @@ def main():
     model_dict = torch.load(model_path, map_location='cpu')
 
     state_dict = model_dict["model"]
-    new_state_dict = {}
-    for k, v in state_dict.items():
-        k = k.replace("module.", "")
-        new_state_dict[k] = v
-    state_dict = new_state_dict
+    # new_state_dict = {}
+    # for k, v in state_dict.items():
+    #     k = k.replace("module.", "")
+    #     new_state_dict[k] = v
+    # state_dict = new_state_dict
 
     final_model = SupDualConResNet(name=model_dict["opt"].model)
+    if torch.cuda.is_available():
+        if torch.cuda.device_count() > 1:
+            final_model.encoder = torch.nn.DataParallel(final_model.encoder)
+    
     final_model = final_model.cuda()
     final_model.load_state_dict(state_dict)
 
-    validate(test_loader, final_model, criterion, model_dict["opt"])
+    validate(test_loader, final_model, criterion, model_dict["opt"], True)
 
 
 if __name__ == '__main__':

@@ -19,7 +19,7 @@ from networks.resnet_big import SupCEResNet
 from custom_dataset import CustomDataset
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "5,6,7"
 
 try:
     import apex
@@ -78,9 +78,9 @@ def parse_option():
 
     # set the path according to the environment
     if opt.data_folder is None:
-        opt.data_folder = './data/food_dataset/'
-    opt.model_path = './save/CE/{}_models'.format(opt.dataset)
-    opt.tb_path = './save/CE/{}_tensorboard'.format(opt.dataset)
+        opt.data_folder = './data/vn_food/'
+    opt.model_path = './save/CE/vnfood_models'
+    opt.tb_path = './save/CE/vnfood_tensorboard'
 
     iterations = opt.lr_decay_epochs.split(',')
     opt.lr_decay_epochs = list([])
@@ -144,12 +144,15 @@ def set_loader(opt):
     ])
 
     if opt.dataset == 'path':
-        image_folder = opt.data_folder + "images/train"
-        texts_data = opt.data_folder + "texts/train_titles.csv"
+        image_folder = opt.data_folder+"images/train"
+        texts_data = opt.data_folder+"texts/train_titles.csv"
         train_dataset = CustomDataset(image_folder, texts_data, transform=transform)
+        
+        train_dataset, val_dataset = torch.utils.data.random_split(train_dataset, [3850, 550], generator=torch.Generator().manual_seed(42))
+
         image_folder = opt.data_folder + "images/test"
         texts_data = opt.data_folder + "texts/test_titles.csv"
-        val_dataset = CustomDataset(image_folder, texts_data, transform=transform)
+        test_dataset = CustomDataset(image_folder, texts_data, transform=transform)
     else:
         raise ValueError(opt.dataset)
 
@@ -160,8 +163,11 @@ def set_loader(opt):
     val_loader = torch.utils.data.DataLoader(
         val_dataset, batch_size=opt.batch_size, shuffle=False,
         num_workers=opt.num_workers, pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=opt.batch_size, shuffle=False,
+        num_workers=opt.num_workers, pin_memory=True)
 
-    return train_loader, val_loader
+    return train_loader, val_loader, test_loader
 
 
 def set_model(opt):
@@ -276,12 +282,12 @@ def validate(val_loader, model, criterion, opt):
 
 
 def main():
-    best_acc = 99999
+    best_loss = 99999
     epochs_no_improve = 0
     opt = parse_option()
 
     # build data loader
-    train_loader, val_loader = set_loader(opt)
+    train_loader, val_loader, test_loader = set_loader(opt)
 
     # build model and criterion
     model, criterion = set_model(opt)
@@ -334,17 +340,22 @@ def main():
     model_dict = torch.load(model_path, map_location='cpu')
 
     state_dict = model_dict["model"]
-    new_state_dict = {}
-    for k, v in state_dict.items():
-        k = k.replace("module.", "")
-        new_state_dict[k] = v
-    state_dict = new_state_dict
+    # new_state_dict = {}
+    # for k, v in state_dict.items():
+    #     k = k.replace("module.", "")
+    #     new_state_dict[k] = v
+    # state_dict = new_state_dict
 
     final_model = SupCEResNet(name=model_dict["opt"].model, num_classes=model_dict["opt"].n_cls)
+    if torch.cuda.is_available():
+        if torch.cuda.device_count() > 1:
+            final_model.encoder = torch.nn.DataParallel(final_model.encoder)
+    
     final_model.load_state_dict(state_dict)
+    final_model.cuda()
 
     validate(test_loader, final_model, criterion, model_dict["opt"])
-
+    
 
 if __name__ == '__main__':
     main()
